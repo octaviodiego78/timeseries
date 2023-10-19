@@ -1,0 +1,309 @@
+---
+title: "Prediction basics"
+format: html
+editor: visual
+---
+
+#Prediction basics
+
+
+### Data
+
+```{r}
+library("easypackages")
+packages("tidyverse","fpp3", "tsibble", "feasts","fable", "patchwork")
+```
+Data will work with
+```{r}
+global_economy |> 
+  filter(Country == "Sweden") |> 
+  autoplot(GDP) +
+  ggtitle("Sweden PIB") + ylab("$US billions")
+```
+### Model definition
+
+```{r}
+TSLM()
+
+```
+
+```{r}
+fit <- global_economy |> 
+  model(trendModel = TSLM(GDP ~ trend()))
+  
+```
+```{r}
+fit
+```
+
+### Predicting
+
+```{r}
+fcst <- fit |> forecast(h="3 years")
+fcst
+```
+```{r}
+fcst |> 
+  filter(Country == "Sweden") |> 
+  autoplot()
+```
+```{r}
+fcst |> 
+  filter(Country == "Sweden") |> 
+  autoplot(global_economy)
+```
+### Simple prediction methods
+
+```{r}
+bricks <- aus_production |> 
+  filter_index("1970" ~ "2004")
+bricks
+```
+```{r}
+bricks |> 
+  autoplot(Bricks)
+```
+#### Mean prediction
+```{r}
+bricks |> model(MEAN(Bricks))
+```
+
+
+```{r}
+train <- aus_production |> filter_index("1992 Q1" ~ "2006 Q4")
+
+beerFit <- train |> 
+  model(
+    Mean = MEAN(Beer),
+    `Naïve`= NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer),
+    Drift = RW(Beer~ drift()) #Randow walk includes a linear component
+  )
+
+#Predict
+beerPredictions <- beerFit |> forecast(h = 14)
+
+#Plot forecast
+
+
+beerPredictions %>%
+  autoplot(filter_index(aus_production, "1992 Q1" ~ .), level = NULL) +
+  ggtitle("Forecasts for quarterly beer production") +
+  xlab("Year") + ylab("Megalitres") +
+  guides(colour=guide_legend(title="Forecast")) +
+  geom_vline(xintercept = as.Date("2007-01-01"), color = "firebrick",
+             linetype = "dashed") +
+  annotate("label", x = c(as.Date("2003-01-01"),as.Date("2009-01-01")),
+           y = 550, label = c("Train set", "Test set"),
+           color = c("black","blue"))
+```
+
+Plotting just predictions
+
+```{r}
+autoplot(beerPredictions)
+```
+Season Naive prediction
+```{r}
+beerPredictions %>%
+  filter(.model == "Seasonal naïve") %>% 
+  autoplot(filter_index(aus_production, "1992 Q1" ~ .)) +
+  ggtitle("Seasonal naïve forecast for quarterly beer production") +
+  xlab("Year") + ylab("Megalitres") +
+  guides(colour=guide_legend(title="Forecast")) +
+  geom_vline(xintercept = as.Date("2007-01-01"), color = "firebrick",
+             linetype = "dashed") +
+  annotate("label", x = c(as.Date("2003-01-01"),as.Date("2009-01-01")),
+           y = 550, label = c("Train set", "Test set"),
+           color = c("black","blue"))
+```
+#### Another exaple
+
+```{r}
+gafa_stock |> distinct(Symbol)
+```
+```{r}
+#Re-index based on trading days
+googleStock <- gafa_stock |> 
+                filter(Symbol == "GOOG") %>%
+                mutate(day = row_number()) |> 
+                update_tsibble(index = day, regular = TRUE)
+
+#Filter the year of interest
+google_2015 <- googleStock |> filter(year(Date) == 2015)
+
+#Fit the model
+googleFit <- google_2015 |> 
+  model(
+      Mean    = MEAN(Close),
+    `Naïve` = NAIVE(Close),
+    Drift   = NAIVE(Close ~ drift()),
+    SNAIVE  = SNAIVE(Close)
+  )
+```
+```{r}
+googleFit
+```
+```{r}
+#Produce forecast for the first 19 trading days in 2016
+googleForecast <- googleFit |> forecast(h=19)
+
+googleForecast
+```
+A better way to use a tsiblle to determine forecast
+```{r}
+#timeframe to predict
+googleJan2016 <- googleStock |> 
+  filter(yearmonth(Date) == yearmonth("2016 Jan"))
+
+#Asking to predict values from the timeframe defined previously
+googleForecast <- googleFit |> forecast(googleJan2016)
+
+#plot the forecast
+googleForecast %>%
+  autoplot(google_2015, level = NULL) +
+    autolayer(googleJan2016, Close, color='black') +
+    ggtitle("Google stock (daily ending 31 Dec 2015)") +
+    xlab("Day") + ylab("Closing Price (US$)") +
+    guides(colour=guide_legend(title="Forecast"))
+```
+Comparing Drift versus NAIVE
+```{r}
+p1 <- googleForecast %>%
+  filter(.model == "Drift") %>% 
+  autoplot(google_2015) +
+    autolayer(googleJan2016, Close, color='black') +
+    ggtitle("Google stock (daily ending 31 Dec 2015)") +
+    xlab("Day") + ylab("Closing Price (US$)") +
+    guides(colour=guide_legend(title="Forecast"))
+
+p2 <- googleForecast %>%
+  filter(.model == "Naïve") %>% 
+  autoplot(google_2015) +
+    autolayer(googleJan2016, Close, color='black') +
+    ggtitle("Google stock (daily ending 31 Dec 2015)") +
+    xlab("Day") + ylab("Closing Price (US$)") +
+    guides(colour=guide_legend(title="Forecast"))
+
+p1 / p2
+```
+## Fitted values and residuals
+
+Each observation in a timeseries could be predicted using previous historic values, this is known as fitted values
+
+Model residuals is the different between fitted values(predictions) and real values
+
+```{r}
+#We can use augment to get fitted values and residuals
+augment(beerFit)
+```
+#### Residual 
+
+A good prediction will give you residuals with the following characteristics
+
+- Not correlated
+- Residuals mean is 0
+
+Useful but not fundamental carachteristics
+
+- Constant variance between them
+- Normally distributed
+
+Box Cox could help with this
+
+```{r}
+google_2015 |> 
+  autoplot(Close) +
+  xlab("Day") + ylab("Closing Price (US$)") +
+  ggtitle("Google Stock in 2015")
+```
+We'll use NAIVE method
+```{r}
+aug <- google_2015 |> 
+  model(NAIVE = NAIVE(Close)) |> 
+  augment()
+
+aug
+```
+```{r}
+#Pulling the average of the residuals without taking nulls into consideration
+
+aug |> pull(.resid) |> mean(na.rm = TRUE)
+```
+```{r}
+p1 <- aug %>% autoplot(.resid) + xlab("Día") + ylab("") +
+  ggtitle("NAIVE residuals")
+
+p2 <- google_2015 |> 
+  autoplot(Close) +
+  xlab("Day") + ylab("Closing Price (US$)") +
+  ggtitle("Google Stock in 2015")
+
+p2/p1
+```
+We have the biggest residuals where there were drastic changes
+```{r}
+aug |> ggplot(aes(x= .resid)) +
+  geom_histogram() +
+  ggtitle("Residuals histogram")
+```
+#Testing if residuals are correlated
+```{r}
+aug %>% ACF(.resid)
+```
+```{r}
+aug %>% ACF(.resid) %>% autoplot() + ggtitle("ACF of residuals")
+```
+#### Using NAIVE model
+
+```{r}
+#function to get info about residuals
+google_2015 |> 
+  model(NAIVE(Close)) |> 
+  gg_tsresiduals()
+```
+```{r}
+aus_production %>% 
+  filter_index("1992" ~ .) %>%
+  model(SNAIVE(Beer)) %>% 
+  gg_tsresiduals()
+```
+```{r}
+aus_production %>% 
+  filter_index("1992" ~ .) %>%
+  gg_tsdisplay(Beer)
+```
+Autocorrelation function shows that residuals are not correlated. It seems that NAIVE method is capturing all important information
+
+#### Using mean model
+```{r}
+google_2015 |> 
+  model(MEAN(Close)) |> 
+  augment() |> 
+  pull(.resid) |> 
+  mean(na.rm = TRUE)
+```
+```{r}
+#residual diagnostic
+
+google_2015 |> 
+  model(MEAN(Close)) |> 
+  gg_tsresiduals() + 
+  ggtitle("Residuals diagnostic for mean method")
+```
+-Correlations are big
+-Residuals follow a pattern
+-Histogram is not normally distributed
+
+#### Methods to evaluate correlation
+```{r}
+#Evaluating NAIVE model
+#We want the box_pierce value to be small
+aug |> features(.resid, box_pierce, lag=10, dof=0)
+```
+
+```{r}
+#We want the Ljung test to be big
+aug %>% features(.resid, ljung_box, lag=10, dof=0)
+```
+
