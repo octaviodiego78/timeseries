@@ -36,7 +36,7 @@ fit <- global_economy |>
 fit
 ```
 
-### Predicting
+## Predicting
 
 ```{r}
 fcst <- fit |> forecast(h="3 years")
@@ -52,7 +52,7 @@ fcst |>
   filter(Country == "Sweden") |> 
   autoplot(global_economy)
 ```
-### Simple prediction methods
+####Simple prediction methods
 
 ```{r}
 bricks <- aus_production |> 
@@ -247,7 +247,7 @@ aug |> ggplot(aes(x= .resid)) +
   geom_histogram() +
   ggtitle("Residuals histogram")
 ```
-#Testing if residuals are correlated
+## Testing if residuals are correlated
 ```{r}
 aug %>% ACF(.resid)
 ```
@@ -306,4 +306,74 @@ aug |> features(.resid, box_pierce, lag=10, dof=0)
 #We want the Ljung test to be big
 aug %>% features(.resid, ljung_box, lag=10, dof=0)
 ```
+This show us that residuals aren't correlated
 
+
+Now, let's test the same but using mean model
+
+```{r}
+google_2015 |> 
+  model(MEAN(Close)) |> 
+  augment() |> 
+  features(.resid, box_pierce,lag=10, dof=0 )
+```
+
+```{r}
+google_2015 |> 
+  model(MEAN(Close)) |> 
+  augment() |> 
+  features(.resid, ljung_box,lag=10, dof=0 )
+```
+
+In both tests, value is big so residuals are not distinguishable from noise
+
+
+## Prediction Intervals
+
+The bigger the interval, the less precise our model.
+Precise prediction by themself is not useful, so we add the foreast interval
+
+There are various types of intervals:
+  - One step interval: When forecast is just one value, standar deviation from forecast is the same for the residuals
+  - multi-step interval: When forecast steps increase, the forecast interval tends to get bigger
+  
+```{r}
+google_2015 |> 
+  model(NAIVE(Close)) |> 
+  forecast(h=10) |> 
+  hilo()
+```
+```{r}
+google_2015 |> 
+  model(NAIVE(Close)) |> 
+  forecast(h=10) |> 
+  autoplot(google_2015)
+```
+#### Bootstrapping to generate different scenarios by resampling data
+
+```{r}
+fit <- google_2015 |> 
+  model(NAIVE(Close))
+
+sim <- fit |> generate(h = 30, times=5, bootstrap =TRUE, seed = 123) #5 possible scenarios for next 30 trading days
+sim
+```
+
+```{r}
+google_2015 %>%
+  ggplot(aes(x = day)) +
+  geom_line(aes(y = Close), size = 1) +
+  geom_line(aes(y = .sim, colour = as.factor(.rep)), data = sim, size = 1) +
+  ggtitle("Google closing stock price") +
+  guides(col = FALSE)
+```
+```{r}
+fc1 <- fit |> forecast(h=30, bootstrap = TRUE) |> autoplot(google_2015) + ggtitle("Google closing stock price")
+
+
+fc2 <- fit |> forecast(h=30) |> autoplot(google_2015) + ggtitle("Google closing stock price") #Not bootstrapped
+
+fc1 / fc2
+
+```
+  
