@@ -1,0 +1,567 @@
+---
+title: "Series decomposition"
+format: html
+editor: visual
+---
+
+# Series decomposition
+
+```{r}
+#libraries
+
+
+suppressMessages(suppressWarnings(library("tidyverse")))
+suppressMessages(suppressWarnings(library("tidyquant")))
+suppressMessages(suppressWarnings(library("lubridate")))
+suppressMessages(suppressWarnings(library("patchwork")))
+suppressMessages(suppressWarnings(library("fpp3")))
+suppressMessages(suppressWarnings(library("scales")))
+suppressMessages(suppressWarnings(library("timetk")))
+suppressMessages(suppressWarnings(library("forecast")))
+suppressMessages(suppressWarnings(library("ggplot2")))
+
+
+```
+
+## Getting data
+
+```{r}
+gamestop <- tq_get("GME", from = "2018-01-01")
+head(gamestop, n = 5)
+```
+
+```{r}
+
+monthlyTransactions <- tq_get("GOOG", get = "stock.prices", from = "2015-01-01") |> 
+  summarise_by_time(
+    .date_var = date,
+    .by = "month",
+    monthlyVolume = sum(volume),
+    trading_days = n(),
+    meanVolume = mean(volume)) |> 
+  
+  mutate(month = yearmonth(date)) |> 
+  select(month, everything(),-date) |> 
+  as_tibble(index = month)
+
+
+head(monthlyTransactions, n = 5)
+```
+
+We can observe how certain months have different amount of trading days
+
+## Plotting
+
+GOOGLE
+
+```{r}
+p1 <- ggplot(data = monthlyTransactions) + 
+  geom_line(aes(x=month, y=monthlyVolume)) + 
+  ylab("Total monthly volume") +
+  xlab("") 
+  
+p2 <- ggplot(data = monthlyTransactions) + 
+  geom_line(aes(x=month, y=meanVolume)) + 
+  ylab("Average daily volume in month") + 
+  xlab("")
+
+p1 / p2
+```
+
+GAMESTOP
+
+```{r}
+gamestop |> 
+  as_tsibble(index = date, key = symbol) |> 
+  autoplot(volume)
+```
+
+## Population adjustments
+
+```{r}
+head(global_economy, n =5)
+```
+
+```{r}
+ge <- global_economy |> 
+  filter(Country == "Mexico" | Country == "Iceland" | Country == "Australia")
+
+p3 <- ggplot(ge) +
+  aes(x = Year, y = GDP, color = Country) +
+  geom_line()
+
+p3
+```
+
+GDP is important but GDP per capita is more important, because it give us context about the real situation of each country
+
+```{r}
+ggplot(ge) +
+  aes(x = Year, y=Population, color = Country) + 
+  geom_line()
+```
+
+Now, let's see GDP per capita
+
+```{r}
+ggplot(ge) +
+  aes(x = Year, y = GDP / Population, color = Country) +
+  geom_line()
+```
+
+Now, Mexico doesn't seem that good
+
+## Inflationary adjustments
+
+```{r}
+head(aus_retail, n = 2)
+```
+
+Getting turnover of Print by year in Australia
+
+```{r}
+printRetail = aus_retail |> 
+  filter(Industry == "Newspaper and book retailing") |> 
+  group_by(Industry) |> 
+  index_by(Year = year(Month)) |> 
+  summarise(Turnover = sum(Turnover))
+
+head(printRetail,4)
+```
+
+```{r}
+ggplot(printRetail) + 
+  aes(x=Year, y = Turnover) +
+  geom_line()
+```
+
+Getting data about Australian economy by year
+
+-   CPI is de value that helps us adjust prices to inflation
+
+```{r}
+ausEconomy <- global_economy |> 
+  filter(Code == "AUS")
+
+head(printRetail,4)
+head(ausEconomy,4)
+
+```
+
+Joining them together and getting adjusted revenue
+
+```{r}
+
+printRetail |> 
+  left_join(ausEconomy, by= "Year") |> 
+  mutate(AdjustedTurnover = Turnover / CPI) |> 
+  
+  #Making data into a wider format. We expanded the data to change the granularity
+  pivot_longer(
+    cols = c(Turnover, AdjustedTurnover),
+    names_to = "Type",
+    values_to = "Turnover",
+    names_transform = list(Type = as_factor)
+  ) |> 
+  
+  ggplot(aes(x = Year, y= Turnover)) +
+  geom_line() +
+  #This function is used to divided into multiple panels or subplots based on the "Type" column
+  facet_grid(vars(Type), scales = "free_y") + 
+  xlab("Years") + ylab(NULL) + 
+  ggtitle("Turnover for the Australian print media industry")
+
+
+```
+
+## Mathematical transformations
+
+#### Logarithmic transformation
+
+```{r}
+data("JohnsonJohnson")
+#Sales are every 3 months
+
+p5 <-autoplot(JohnsonJohnson)  +
+  ggtitle("Sales in J & J")
+
+
+p6 <- autoplot(log(JohnsonJohnson)) +
+  ggtitle("Logaritmic sales in J&J")
+
+
+p5 / p6
+```
+
+#### Power transformations
+
+```{r}
+autoplot(JohnsonJohnson^(1/3)) +
+  ggtitle("Sales ^(1/#)J&J")
+```
+
+#### Box cox transformations
+
+$$
+y(\lambda) = \begin{cases}
+    \frac{y^\lambda - 1}{\lambda}, & \text{if } \lambda \neq 0 \\
+    \ln(y), & \text{if } \lambda = 0
+\end{cases}
+$$
+
+```{r}
+p5a <- aus_production %>% autoplot(Gas)+ 
+  ggtitle("Real gas production")
+
+p5 <- aus_production %>% autoplot(box_cox(Gas,lambda = -0.5)) + ggtitle("Box-Cox, lambda = -0.5")
+
+p6 <- aus_production %>% autoplot(box_cox(Gas,lambda = 0)) + ggtitle("Box-Cox, lambda = 0 (log)")
+
+p7 <- aus_production %>% autoplot(box_cox(Gas,lambda = 0.1)) + ggtitle("Box-Cox, lambda = 0.1")
+
+p8 <- aus_production %>% autoplot(box_cox(Gas,lambda = 1)) + ggtitle("Box-Cox, lambda = 1")
+
+p5a
+```
+
+```{r}
+(p5 | p6) / (p7 | p8)
+```
+
+```{r}
+head(aus_production,3) 
+```
+
+```{r}
+(lambda <- aus_production %>%
+  features(Gas, features = guerrero) %>%
+  pull(lambda_guerrero))
+```
+
+Box cox plot vs real data plot
+
+```{r}
+p5a / aus_production %>% autoplot(box_cox(Gas, lambda))
+```
+
+# Time series components
+
+Additive decomposition $$ 
+  y_t = S_t + T_t + R_t 
+$$ Multiplicative decomposition $$
+y_t = S_t \cdot T_t \cdot R_t
+$$
+
+Using retail employment since 1990 as an example
+
+```{r}
+retailEmployment <- us_employment |> 
+  filter(year(Month) >= 1990, Title == "Retail Trade") |> 
+  select(-Series_ID)
+
+head(retailEmployment,3)
+```
+
+```{r}
+retailEmployment |> 
+  autoplot(Employed) + 
+  xlab("Year") + ylab("Persons(thousands)") +
+  ggtitle("Total employment in US Retail")
+```
+
+We'll do a STL decomposition
+
+```{r}
+
+dcmp <- retailEmployment |> 
+  model(Decomposition = STL(Employed))
+
+components(dcmp)
+```
+
+Trend show series movement without seasonality nor residuals
+
+```{r}
+retailEmployment |> 
+  autoplot(Employed, color = 'gray') +
+  autolayer(components(dcmp),trend, color="red")+
+  xlab("Year") + ylab("Persons (in thousands)")
+```
+
+We can plot the 3 components simultaniously with:
+
+```{r}
+p <- components(dcmp) |>  autoplot() + xlab("Year")
+plotly::ggplotly(p)
+```
+
+People employed since 2018
+
+```{r}
+components(dcmp) %>% 
+  as_tibble() %>% 
+  mutate(Month = as.Date(Month)) %>% 
+  filter(Month >= "2018-01-01") %>% 
+  ggplot(aes(x = Month, y = Employed)) +
+  geom_line() + xlab("Year") +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+Data without the seasonal component
+
+For additive decomposition, we could get not seasonally adjusted data like this:
+
+$$ y_t - S_t $$
+
+For multiplicative decomposition would be like this
+
+$$ y_t / S_t $$
+
+```{r}
+retailEmployment %>%
+  autoplot(Employed, color='gray') +
+  autolayer(components(dcmp), season_adjust, color='blue') +
+  xlab("Year") + ylab("Persons (thousands)") +
+  ggtitle("Total employment in US retail")
+```
+
+# Moving averages
+
+$$
+{MA}_{t} = \frac{1}{n} \sum_{i=t-n+1}^{t} y_i
+$$
+
+```{r}
+p <- global_economy |> 
+  filter(Country == "Mexico") |> 
+  autoplot(Exports) +
+  xlab("Years") + ylab("% of GDP") +
+  ggtitle("Total Mexican exports")
+  
+plotly::ggplotly(p)
+```
+
+Moving avergae of 5 days, it takes 2 days before, 2 days after and the actual day to compute MA
+```{r}
+mexExports <- global_economy |> 
+  filter(Country == "Mexico") |> 
+  mutate(
+    "5MA" = slider::slide_dbl(Exports, mean, 
+                               .before   = 2, 
+                               .after    = 2,
+                               .complete = TRUE)
+  )
+
+mexExports
+``` 
+```{r}
+gg <- mexExports |> 
+  ggplot(aes(x = Year, y = Exports)) + 
+  geom_line() +
+  xlab("Year") + ylab("Exports (% of GDP)")
+  
+gg + geom_line(aes(y = `5MA`), color='red') +
+  ggtitle("Total Mexican exports & 5-MA")
+```
+Same result using autoplot and autolayer
+
+```{r}
+mexExports |> 
+  autoplot(Exports) +
+  autolayer(mexExports,`5MA`, color = "red") +
+  xlab("Year") + ylab("Exports (% of GDP)") +
+  ggtitle("Total Mexican exports & 5-MA")
+```
+Let's try some other MA
+```{r}
+mexExports <- mexExports %>%
+  mutate(
+    `1-MA` = slider::slide_dbl(Exports, mean, 
+                               .before = 0, 
+                               .after = 0, .complete = TRUE),
+    `3-MA` = slider::slide_dbl(Exports, mean, 
+                               .before = 1, 
+                               .after = 1, .complete = TRUE),
+    `7-MA` = slider::slide_dbl(Exports, mean, 
+                               .before = 3, 
+                               .after = 3, .complete = TRUE),
+    `9-MA` = slider::slide_dbl(Exports, mean, 
+                               .before = 4, 
+                               .after = 4, .complete = TRUE),
+    `11-MA` = slider::slide_dbl(Exports, mean, 
+                                .before = 5, 
+                                .after = 5, .complete = TRUE),
+    `15-MA` = slider::slide_dbl(Exports, mean, 
+                                .before = 7, 
+                                .after = 7, .complete = TRUE),
+    `17-MA` = slider::slide_dbl(Exports, mean, 
+                                .before = 8, 
+                                .after = 8, .complete = TRUE),
+    `21-MA` = slider::slide_dbl(Exports, mean, 
+                                .before = 10, 
+                                .after = 10, .complete = TRUE)
+  )
+
+gg <- mexExports %>%
+  ggplot(aes(x = Year, y = Exports)) + 
+  geom_line() +
+  xlab("Year") + ylab("Exports (% of GDP)")
+
+g1 <- gg +
+ geom_line(aes(y = `1-MA`), color='red') +
+  ggtitle("1-MA")
+g3 <- gg +
+ geom_line(aes(y = `3-MA`), color='red') +
+  ggtitle("3-MA")
+g5 <- gg +
+ geom_line(aes(y = `5MA`), color='red') +
+  ggtitle("5-MA")
+g7 <- gg +
+ geom_line(aes(y = `7-MA`), color='red') +
+  ggtitle("7-MA")
+g9 <- gg +
+ geom_line(aes(y = `9-MA`), color='red') +
+  ggtitle("9-MA")
+g11 <- gg +
+ geom_line(aes(y = `11-MA`), color='red') +
+  ggtitle("11-MA")
+g15 <- gg +
+ geom_line(aes(y = `15-MA`), color='red') +
+  ggtitle("15-MA")
+g17 <- gg +
+ geom_line(aes(y = `17-MA`), color='red') +
+  ggtitle("17-MA")
+g21 <- gg +
+ geom_line(aes(y = `21-MA`), color='red') +
+  ggtitle("21-MA")
+
+(g1 | g3 | g5) /
+  (g7 | g9 | g11) /
+  (g15 | g17 | g21)
+```
+
+```{r}
+mexExports %>% 
+  pivot_longer(
+    cols      = `5MA`:`21-MA`,
+    names_to  = "Orden",
+    values_to = "Media móvil"
+  ) %>% 
+  ggplot(aes(x = Year, y = Exports)) + 
+  geom_line() + 
+  geom_line(aes(y = `Media móvil`), color = "red") +
+  xlab("Año") + ylab("Exportaciones (% of PIB)") +
+  facet_wrap(~ Orden) +
+  theme_minimal()
+```
+
+## Moving averages from moving averages
+
+We can have a n moving average from Sales and then have a n moving average from the MA previously calaculated
+
+```{r}
+beer <- aus_production |> 
+  filter(year(Quarter) >= 1992) |> 
+  select(Quarter, Beer)
+
+beerMa <- beer %>%
+  mutate(
+    `4-MA` = slider::slide_dbl(Beer, mean, .before = 2, .after = 1, .complete = TRUE),
+    `2x4-MA` = slider::slide_dbl(`4-MA`, mean, .before = 0, .after = 1, .complete = TRUE)
+  )
+
+beerMa
+```
+# Weighted moving average
+
+$$
+{WMA}_{t} = {\sum_{i=t-n+1}^{t} w_i  y_i} 
+$$
+```{r}
+us_retail_employment_ma <- retailEmployment %>%
+  mutate(
+    `12-MA` = slider::slide_dbl(Employed, mean, .before = 6, .after = 5, .complete = TRUE),
+    `2x12-MA` = slider::slide_dbl(`12-MA`, mean, .before = 0, .after = 1, .complete = TRUE)
+  )
+
+us_retail_employment_ma %>%
+  autoplot(Employed, color='gray') +
+  autolayer(us_retail_employment_ma, vars(`2x12-MA`), color='red') +
+  xlab("Year") + ylab("Persons (thousands)") +
+  ggtitle("Total employment in US retail, 2x12-MA")
+```
+
+# Decomposition methods
+
+### Classic decomposition
+With this decomposition we asume that seasonality is constant through the time
+```{r}
+retailEmployment |> 
+  model(classical_decomposition(Employed, type="additive")) |> 
+  components() |> 
+  autoplot() +
+  xlab("Year") +
+  ggtitle("Classical additive decomposition of total US retail employment")
+```
+
+### X11 Decomposition
+Works well with trimestal and monthly data. Has mechanisms to handle unbalanced calendar months 
+```{r}
+x11_dcmp <- retailEmployment %>%
+  model(x11 = feasts:::X11(Employed, type = "additive")) %>%
+  components()
+
+autoplot(x11_dcmp)
+
+```
+Looking at seasonality
+```{r}
+x11_dcmp |>  
+  gg_season()
+
+```
+
+```{r}
+x11_dcmp |> 
+  gg_subseries(seasonal)
+```
+### Seats decomposition
+
+Seasonal Extraction Arima Time Series. Just for trimestal or monthly data
+
+```{r}
+seats_dcmp <- retailEmployment |> 
+  model(seats = feasts:::SEATS(Employed)) |> 
+  components()
+
+autoplot(seats_dcmp) + xlab("Year") +
+  ggtitle("SEATS decomposition of total US retail employment")
+```
+### STL Decomposition 
+
+Seasonal and Trend decomposition using Loess
+```{r}
+retailEmployment |> 
+  model(STL(Employed ~ trend(window=7) + season(window='periodic'),
+    robust = TRUE)) %>%
+  components() %>%
+  autoplot()
+```
+Using a different moving average
+```{r}
+retailEmployment %>%
+  model(STL(Employed ~ trend(window=15) + season(window='periodic'),
+    robust = TRUE)) %>%
+  components() %>%
+  autoplot()
+```
+```{r}
+retailEmployment %>%
+  model(STL(Employed ~ trend(window=7) + season(window=21),
+    robust = TRUE)) %>%
+  components() %>%
+  autoplot()
+```
+
+
