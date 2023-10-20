@@ -376,4 +376,107 @@ fc2 <- fit |> forecast(h=30) |> autoplot(google_2015) + ggtitle("Google closing 
 fc1 / fc2
 
 ```
-  
+## Forecast with transformed data
+
+For example we can train and predict with log sales and the reversed the logarithmic with exponential to get real values
+With transformed data we can no longer get mean of all predictions
+
+For forecast adjusted by skew we used just lst(median)
+```{r}
+eggs <- as_tsibble(fma::eggs)
+eggs %>% 
+  model(RW(log(value) ~ drift())) %>% 
+  forecast(h=50) %>% 
+  autoplot(eggs, level = 80,  
+           point_forecast = lst(mean, median))
+```
+## Forecasts with decomposition
+
+```{r}
+us_retail_employment <- us_employment %>%
+  filter(year(Month) >= 1990, Title == "Retail Trade")
+
+us_retail_employment %>% 
+autoplot(Employed)
+
+```
+```{r}
+dcmp <- us_retail_employment %>%
+  model(STL(Employed ~ trend(window = 7), robust=TRUE)) %>%
+  components() %>%
+  select(-.model)
+
+dcmp
+
+```
+```{r}
+dcmp %>%
+  model(NAIVE(season_adjust)) %>%
+  forecast() %>%
+  autoplot(dcmp) + ylab("New orders index")  +
+  ggtitle("NAIVE forecast from data without seasonality")
+```
+We can add back sesonality with decomposition_model()
+```{r}
+us_retail_employment |> 
+  model(stlf = decomposition_model(STL(Employed ~ trend(window = 7), robust = TRUE),
+                                   NAIVE(season_adjust),
+                                   SNAIVE(season_year)
+                                   )) |> 
+  forecast() |> 
+  autoplot(us_retail_employment)
+
+```
+## Model evaluation
+
+
+##### Train-test split
+
+```{r}
+aus_production
+```
+
+```{r}
+#Filtering by index
+
+aus_production %>%
+  slice(n()-19:0) #Getting the last 20 records
+```
+
+##### Forecast errors
+Different from residuals that are calculated based on train, forectast error are calculated from forecasts
+Forecast error can be calculated from multistep forecasts
+
+MAE
+RMSE
+
+```{r}
+recent_production <- aus_production %>% filter(year(Quarter) >= 1992)
+beer_train <- recent_production %>% filter(year(Quarter) <= 2007)
+
+beer_fit <- beer_train %>%
+  model(
+    Mean = MEAN(Beer),
+    `Naïve` = NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer),
+    Drift = RW(Beer ~ drift())
+  )
+
+beer_fc <- beer_fit %>%
+  forecast(h = 10)
+
+beer_fc %>%
+  autoplot(recent_production, level = NULL) +
+  xlab("Year") + ylab("Megalitres") +
+  ggtitle("Forecasts for quarterly beer production") +
+  guides(colour=guide_legend(title="Forecast"))
+```
+```{r}
+#Train accuracy
+fabletools::accuracy(beer_fit)
+```
+```{r}
+beer_fc %>% 
+  fabletools::accuracy(recent_production)
+```
+
