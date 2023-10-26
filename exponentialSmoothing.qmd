@@ -1,0 +1,442 @@
+---
+title: "exponentialSmoothing"
+format: html
+editor: visual
+---
+
+# Exponential smoothing
+Forecasts from exponential smoothing are weigthed averages of past observations
+
+## Simple exponential smoothing
+Useful for making forecasts of series that have no clear patterns in trend or seasonality
+
+```{r}
+library(easypackages)
+libraries("tidyverse","fpp3", "patchwork","plotly")
+```
+
+```{r}
+algeriaEconomy <- global_economy |> 
+  filter(Country == "Algeria")
+
+algeriaEconomy |> 
+  autoplot(Exports) +
+  ylab("Exports(% of GDP)") +  xlab("Years")
+  
+
+```
+Naive method is a weigthed average were the last value has a weight of 100%
+Mean method is a  weigthed average were all weigths are distributed equally
+
+$$
+\hat{y}_{T+1|T} = \alpha y_T + \alpha(1-\alpha) y_{T-1} + \alpha(1-\alpha)y_{T-2}
+$$
+
+
+The bigger the alpha the memory of the model is longer
+
+
+#Estimate parameters
+```{r}
+fit <- algeriaEconomy |> 
+  model( SES = ETS(Exports ~ error("A") + trend("N") + season("N"), opt_crit = "mse"), #Additive model, no trend, no season
+         NAIVE = NAIVE(Exports))
+         
+fc <- fit |> 
+  forecast(h=5)
+
+fc |> autoplot(algeriaEconomy |> 
+                 filter_index("2000"~.),#"2000"~. means data starting in 2000
+               level = NULL) +  #NULL is to not show confidence intervals
+                  ylab("Exports (% of GDP)") + xlab("Year")
+  
+```
+Performance report
+```{r}
+fit %>% 
+  select(SES) %>% 
+  report()
+```
+
+# Methods for sets with trend
+
+## Holt Lineal Trend Model
+
+
+Forecast ecuation
+$$
+\hat{y}_{t+h} = 1_t + hb_t
+$$
+Level ecuation
+$$
+1_t = \alpha y_t + (1 - \alpha)(1_{t-1} + b_{t-1})
+$$
+Trend ecuation
+$$
+b_t = \beta \cdot (1_{t-1} - 1_{t-2}) + (1 - \beta) b_{t-1}
+$$
+
+
+Code is the same but just adding trend("A")
+```{r}
+ausEconomy <- global_economy |> 
+  filter(Country == "Australia") |> 
+  mutate(Pop = Population / 1e6)
+
+ausEconomy |> autoplot(Pop)
+```
+```{r}
+fit <- ausEconomy |> 
+  model(AAN = ETS(Pop ~ error("A") + trend("A") + season("N")),
+        Drift = RW(Pop ~ drift()) #RW is to forecast assuming linear trend
+        )
+
+fc <- fit |> 
+  forecast(h=10)
+
+fc |> autoplot(ausEconomy |> 
+                 filter_index("2000"~.),level=NULL)
+```
+```{r}
+fit |> 
+  glance()
+```
+```{r}
+fit |> 
+  select(AAN) |> 
+  report()
+```
+
+## Damped trend methods
+
+Holt methos assumes that trend will be constante. Dammped trend method adds a damping parameters for the trend
+Phi is the parameter. usually is bigger than 0.8, otherwise damping is really strong
+```{r}
+ausEconomy |> 
+  model(
+    `Holt` = ETS(Pop ~ error("A") + trend("A")),
+  `Damped Holt` = ETS(Pop ~ error("A") + trend("Ad"))
+  ) |> 
+  forecast(h = "15 years") |> 
+  autoplot(ausEconomy, level= NULL) +
+  ggtitle("Forecasts from Holt's method") + xlab("Year") +
+  ylab("Population of Australia (millions)") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+```{r}
+ausEconomy |> 
+  model(`Damped Holt` = ETS(Pop ~ error("A") + trend("Ad"))) |> 
+  report()
+```
+```{r}
+ausEconomy %>%
+  model(
+    `Holt` = ETS(Pop ~ error("A") + trend("A")),
+    `Damped Holt` = ETS(Pop ~ error("A") + trend("Ad", phi = 0.8))
+  ) %>%
+  forecast(h = "15 years") %>%
+  autoplot(ausEconomy, level = NULL) +
+  ggtitle("Forecasts from Holt's method") + xlab("Year") +
+  ylab("Population of Australia (millions)") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+```{r}
+pop_fit <- ausEconomy %>%
+  model(
+    `Damped Holt mse` = ETS(Pop ~ error("A") + trend("Ad"), opt_crit = "mse"),
+    `Damped Holt lik` = ETS(Pop ~ error("A") + trend("Ad"), opt_crit = "lik")
+  )
+
+pop_fit %>% 
+  select(`Damped Holt mse`) %>% 
+  report()
+```
+```{r}
+pop_fit %>% tidy() #Damped Holt lik
+```
+```{r}
+pop_fit |> 
+  forecast(h=15) |> 
+  autoplot(ausEconomy %>% filter_index("2005"~.), level = NULL) +
+  ggtitle("Forecasts from Holt's method") + xlab("Year") +
+  ylab("Population of Australia (millions)") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+#### Another 
+```{r}
+www_usage <- as_tsibble(WWWusage)
+www_usage %>% autoplot(value) +
+  xlab("Minute") + ylab("Number of users")
+```
+
+```{r}
+www_usage %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    SES = ETS(value ~ error("A") + trend("N") + season("N")),
+    Holt = ETS(value ~ error("A") + trend("A") + season("N")),
+    Damped = ETS(value ~ error("A") + trend("Ad") + season("N"))
+  ) %>%
+  forecast(h = 1) %>%
+  accuracy(www_usage)
+```
+Based on RMSE, MAE and MAPE, Damped Hold is the best model
+Let's see it's parameters
+```{r}
+fit <- www_usage %>%
+  model(Damped = ETS(value ~ error("A") + trend("Ad") + season("N")))
+# Los parámetros estimados:
+tidy(fit)
+```
+```{r}
+fit |> forecast(h=10) |> 
+  autoplot(www_usage)+
+  xlab("Minute") + ylab("Number of users")
+```
+# Methods with seasonality
+
+For this method a new parameters that defines seasonal period is added. There are two variants for this method: additive and multiplicative. $Additive$ is used when seasonal component remains constant over time. Multiplicative is used when seasonal component varies with the serie
+```{r}
+ausHolidays <- tourism |> 
+  filter(Purpose == "Holiday") |> 
+  summarise(Trips = sum(Trips))
+
+ausHolidays |> 
+  autoplot()
+```
+```{r}
+fit <- ausHolidays |> 
+  model(
+    additive = ETS(Trips ~ error("A") + trend("A") + season("A")),
+    multiplicative = ETS(Trips ~ error("M") + trend("A") + season("M"))
+  )
+
+fit |> tidy()
+```
+```{r}
+fc <- fit |> 
+  forecast(h = "3 years")
+
+fc |> autoplot(ausHolidays, level = NULL)  + xlab("Year") +
+  ylab("Overnight trips (millions)") +
+  scale_color_brewer(type = "qual", palette = "Dark2")
+```
+## Damped Holt-Winters model
+
+Any of the variant os Holt-Winters can be damped
+```{r}
+sth_cross_ped <- pedestrian %>%
+  filter(Sensor == "Southern Cross Station", yearmonth(Date) == yearmonth("2016 July")) %>%
+  index_by(Date) %>%
+  summarise(Count = sum(Count))
+
+sth_cross_ped %>%
+  model(hw = ETS(Count ~ error("M") + trend("Ad") + season("M"))) %>%
+  forecast(h = "2 weeks") %>%
+  autoplot(sth_cross_ped)
+```
+## ETS model automatic selection
+```{r}
+automaticETS <- sth_cross_ped |> 
+  model(hw = ETS(Count))
+
+automaticETS |> 
+  report()
+```
+```{r}
+automaticETS |> 
+  forecast(h = "2 weeks") |> 
+  autoplot(sth_cross_ped)
+```
+```{r}
+sth_cross_ped |> 
+  model(
+    `automatic ETS` = ETS(Count),
+    `HW` = ETS(Count  ~ error("M") + trend("Ad") + season("M"))
+    ) |> 
+    forecast(h = "2 weeks") |> 
+      autoplot(sth_cross_ped, level=NULL)
+  
+```
+```{r}
+sth_cross_ped |> 
+  model(
+    `ETS automático` = ETS(Count),
+    `HW`             = ETS(Count ~ error("M") + trend("Ad") + season("M"))
+  ) |> accuracy()
+```
+
+# Exponential Smoothing VS Reference methods
+```{r}
+recent_production <- aus_production %>% filter(year(Quarter) >= 1992)
+beer_train <- recent_production %>% filter(year(Quarter) <= 2007)
+
+beer_fit <- beer_train %>%
+  model(
+    Mean = MEAN(Beer),
+    `Naïve` = NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer),
+    Drift = RW(Beer ~ drift())
+  )
+
+beer_fc <- beer_fit %>%
+  forecast(h = 10)
+
+beer_fc %>%
+  autoplot(filter(aus_production, year(Quarter) >= 1992), level = NULL) +
+  xlab("Year") + ylab("Megalitres") +
+  ggtitle("Forecasts for quarterly beer production") +
+  guides(colour=guide_legend(title="Forecast"))
+```
+Seasonal NAIVE is the best
+```{r}
+accuracy(beer_fc, recent_production)
+```
+Seasonal NAIVE VS damped Holt-Winter method
+```{r}
+beer_fit <- beer_train %>%
+  model(
+    `Seasonal naïve` = SNAIVE(Beer),
+    `Damped Holt Winters` = ETS(Beer ~ error("M") + trend("Ad") + 
+                           season("M")),
+    `additive ETS without trend` = ETS(Beer ~ error("A") + trend("N") + season("A"))
+  )
+
+beer_fc <- beer_fit |> 
+  forecast(h=10)
+
+gg_beer <- beer_fc %>%
+  autoplot(filter(aus_production, year(Quarter) >= 1992), level = NULL) +
+  xlab("Year") + ylab("Megalitres") +
+  ggtitle("Forecasts for quarterly beer production") +
+  guides(colour=guide_legend(title="Forecast"))
+
+gg_beer_zoom <-  gg_beer + tidyquant::coord_x_date(xlim = c("2007-10-01","2010-04-01")) + ggtitle("") + 
+  theme(legend.position = "none")
+
+(gg_beer) / (gg_beer_zoom)
+```
+```{r}
+accuracy(beer_fc, recent_production)
+```
+```{r}
+beer_fc %>%
+  filter(.model == "Damped Holt Winters") %>% 
+  autoplot(filter(aus_production, year(Quarter) >= 1992)) +
+  xlab("Year") + ylab("Megalitres") +
+  ggtitle("Forecast for quarterly beer production using the Damped Holt Winters method") +
+  guides(colour=guide_legend(title="Forecast"))
+```
+#### EEUU employment example
+```{r}
+us_retail_employment <- us_employment %>%
+  filter(year(Month) >= 1990, Title == "Retail Trade")
+
+us_retail_employment %>% 
+  autoplot(Employed)
+
+```
+```{r}
+
+us_retail_train <- us_retail_employment %>% 
+  filter(year(Month) <=2017)
+
+us_retail_fit <- us_retail_train %>%
+  model(
+    `Seasonal naïve` = SNAIVE(Employed),
+    `SE sin tendencia` = ETS(Employed ~ error("A") + trend("N") + season("A")),
+    `HW amortiguado aditivo` = ETS(Employed ~ error("A") + trend("Ad") + season("A"))
+  )
+
+# Pronóstico
+us_retail_fc <- us_retail_fit %>%
+  forecast(h = 21)
+
+gg_usret <- us_retail_fc %>%
+  autoplot(us_retail_employment, level = NULL) +
+  xlab("Year") + ylab("Employed") +
+  ggtitle("Forecasts for US Retail Employment") +
+  guides(colour=guide_legend(title="Forecast"))
+
+gg_usret_zoom <-  gg_usret + tidyquant::coord_x_date(xlim = c("2018-01-01","2019-09-01"), ylim = c(15250, 16500)) + ggtitle("") + 
+  theme(legend.position = "none")
+
+(gg_usret) / (gg_usret_zoom)
+```
+```{r}
+accuracy(us_retail_fc, us_retail_employment)
+```
+Seasonal NAIVE is again better than Exponentially Smoothed methods
+
+We can apply a STL model to model the series in 2 components
+- Seasonal component
+- Deseasonalized serie, with simple exponential smoothing
+```{r}
+us_retail_fit <- us_retail_train %>%
+  model(
+    `Seasonal naïve` = SNAIVE(Employed),
+    `ETS automático` = ETS(Employed),
+    `Descomposición + SE` = decomposition_model(
+      STL(Employed ~ trend(), robust = TRUE),
+    ETS(season_adjust ~ error("A") + trend("N") + season("N"))
+    ),
+    `Descomposición + SE auto` = decomposition_model(
+      STL(Employed ~ trend(), robust = TRUE),
+    ETS(season_adjust)
+    )
+  )
+  
+# Pronóstico
+us_retail_fc <- us_retail_fit %>%
+  forecast(h = 21)
+
+gg_usret <- us_retail_fc %>%
+  autoplot(us_retail_employment, level = NULL) +
+  xlab("Year") + ylab("Employed") +
+  ggtitle("Forecasts for US Retail Employment") +
+  guides(colour=guide_legend(title="Forecast"))
+
+gg_usret_zoom <-  gg_usret + tidyquant::coord_x_date(xlim = c("2018-01-01","2019-09-01"), ylim = c(15250, 16500)) + ggtitle("") + 
+  theme(legend.position = "none")
+
+(gg_usret) / (gg_usret_zoom)
+
+```
+
+```{r}
+accuracy(us_retail_fc, us_retail_employment)
+```
+Descomposición + SE is the best 
+
+We can easily combine 2 models by getting the average
+```{r}
+us_retail_fit2 <- us_retail_fit %>% 
+  mutate(
+    modelo_combinado = (`Seasonal naïve` + `Descomposición + SE`)/2
+    ) %>% 
+  select(-c(`ETS automático`, `Descomposición + SE auto`))
+
+accuracy(us_retail_fit2)
+```
+Forecast
+```{r}
+
+# Pronóstico
+us_retail_fc2 <- us_retail_fit2 %>%
+  forecast(h = 21)
+
+gg_usret <- us_retail_fc2 %>%
+  autoplot(us_retail_employment, level = NULL) +
+  xlab("Year") + ylab("Employed") +
+  ggtitle("Forecasts for US Retail Employment") +
+  guides(colour=guide_legend(title="Forecast"))
+
+gg_usret_zoom <-  gg_usret + tidyquant::coord_x_date(xlim = c("2018-01-01","2019-09-01"), ylim = c(15250, 16500)) + ggtitle("") + 
+  theme(legend.position = "none")
+
+(gg_usret) / (gg_usret_zoom)
+```
+```{r}
+accuracy(us_retail_fc2, us_retail_employment)
+```
+The combined model is the best
