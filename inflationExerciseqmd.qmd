@@ -1,0 +1,62 @@
+---
+title: "Untitled"
+format: 
+  html:
+    embeded resources: true
+---
+
+##PKGS
+
+```{r}
+#| message: false
+library(tidyverse)
+library(fpp3)
+```
+
+##Inflation
+
+```{r}
+inflacion_tbl <- readxl::read_excel("inflation_.xlsx", 
+                                    sheet = "Indicadores20231020073743", 
+                                    skip =4, #Skip the first 4 rows
+                                    col_types = c("date", "numeric")) %>% 
+  drop_na() %>% 
+  mutate(
+    fecha = seq(as.Date("2008-01-01"), by = "15 days", 
+  length.out = 378
+    ))
+inflacion_tbl
+```
+```{r}
+inflacion_tsbl <- inflacion_tbl %>% 
+as_tsibble( index = fecha)
+inflacion_tsbl
+```
+
+```{r}
+inflacion_tsbl %>% 
+  autoplot(Inflacion)
+inflacion_tsbl %>% 
+  gg_season(Inflacion)
+```
+```{r}
+inflacion_tsbl %>% 
+  model(STL(Inflacion, robust = TRUE)) %>% 
+  components( ) %>% 
+  autoplot()
+```
+
+##Fitting
+```{r}
+inflacion_fit <- inflacion_tsbl %>% 
+  model(
+    snaive = SNAIVE(Inflacion),
+    ets_ANA=ETS(Inflacion ~ error("A") + trend("N")+
+               season("A")),
+    ets_AAA=ETS(Inflacion ~ error("A") + trend("A")+
+               season("A")),
+    ets_auto = ETS(Inflacion)
+  )
+inflacion_fit
+```
+
