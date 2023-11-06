@@ -1,13 +1,19 @@
 ---
+
+---
+
+![]()\-\--
 title: "exponentialSmoothing"
 format: html
 editor: visual
----
+\-\--
 
 # Exponential smoothing
+
 Forecasts from exponential smoothing are weigthed averages of past observations
 
 ## Simple exponential smoothing
+
 Useful for making forecasts of series that have no clear patterns in trend or seasonality
 
 ```{r}
@@ -25,18 +31,17 @@ algeriaEconomy |>
   
 
 ```
-Naive method is a weigthed average were the last value has a weight of 100%
-Mean method is a  weigthed average were all weigths are distributed equally
+
+Naive method is a weigthed average were the last value has a weight of 100% Mean method is a weigthed average were all weigths are distributed equally
 
 $$
 \hat{y}_{T+1|T} = \alpha y_T + \alpha(1-\alpha) y_{T-1} + \alpha(1-\alpha)y_{T-2}
 $$
 
-
 The bigger the alpha the memory of the model is longer
 
-
 #Estimate parameters
+
 ```{r}
 fit <- algeriaEconomy |> 
   model( SES = ETS(Exports ~ error("A") + trend("N") + season("N"), opt_crit = "mse"), #Additive model, no trend, no season
@@ -51,7 +56,9 @@ fc |> autoplot(algeriaEconomy |>
                   ylab("Exports (% of GDP)") + xlab("Year")
   
 ```
+
 Performance report
+
 ```{r}
 fit %>% 
   select(SES) %>% 
@@ -62,22 +69,16 @@ fit %>%
 
 ## Holt Lineal Trend Model
 
-
-Forecast ecuation
-$$
+Forecast equation $$
 \hat{y}_{t+h} = 1_t + hb_t
-$$
-Level ecuation
-$$
+$$ Level equation $$
 1_t = \alpha y_t + (1 - \alpha)(1_{t-1} + b_{t-1})
-$$
-Trend ecuation
-$$
+$$ Trend equation $$
 b_t = \beta \cdot (1_{t-1} - 1_{t-2}) + (1 - \beta) b_{t-1}
 $$
 
-
 Code is the same but just adding trend("A")
+
 ```{r}
 ausEconomy <- global_economy |> 
   filter(Country == "Australia") |> 
@@ -85,6 +86,7 @@ ausEconomy <- global_economy |>
 
 ausEconomy |> autoplot(Pop)
 ```
+
 ```{r}
 fit <- ausEconomy |> 
   model(AAN = ETS(Pop ~ error("A") + trend("A") + season("N")),
@@ -97,10 +99,12 @@ fc <- fit |>
 fc |> autoplot(ausEconomy |> 
                  filter_index("2000"~.),level=NULL)
 ```
+
 ```{r}
 fit |> 
   glance()
 ```
+
 ```{r}
 fit |> 
   select(AAN) |> 
@@ -109,8 +113,8 @@ fit |>
 
 ## Damped trend methods
 
-Holt methos assumes that trend will be constante. Dammped trend method adds a damping parameters for the trend
-Phi is the parameter. usually is bigger than 0.8, otherwise damping is really strong
+Holt methos assumes that trend will be constante. Dammped trend method adds a damping parameters for the trend Phi is the parameter. usually is bigger than 0.8, otherwise damping is really strong
+
 ```{r}
 ausEconomy |> 
   model(
@@ -123,11 +127,13 @@ ausEconomy |>
   ylab("Population of Australia (millions)") +
   guides(colour = guide_legend(title = "Forecast"))
 ```
+
 ```{r}
 ausEconomy |> 
   model(`Damped Holt` = ETS(Pop ~ error("A") + trend("Ad"))) |> 
   report()
 ```
+
 ```{r}
 ausEconomy %>%
   model(
@@ -140,6 +146,7 @@ ausEconomy %>%
   ylab("Population of Australia (millions)") +
   guides(colour = guide_legend(title = "Forecast"))
 ```
+
 ```{r}
 pop_fit <- ausEconomy %>%
   model(
@@ -151,9 +158,11 @@ pop_fit %>%
   select(`Damped Holt mse`) %>% 
   report()
 ```
+
 ```{r}
 pop_fit %>% tidy() #Damped Holt lik
 ```
+
 ```{r}
 pop_fit |> 
   forecast(h=15) |> 
@@ -162,7 +171,9 @@ pop_fit |>
   ylab("Population of Australia (millions)") +
   guides(colour = guide_legend(title = "Forecast"))
 ```
-#### Another 
+
+#### Another
+
 ```{r}
 www_usage <- as_tsibble(WWWusage)
 www_usage %>% autoplot(value) +
@@ -180,22 +191,26 @@ www_usage %>%
   forecast(h = 1) %>%
   accuracy(www_usage)
 ```
-Based on RMSE, MAE and MAPE, Damped Hold is the best model
-Let's see it's parameters
+
+Based on RMSE, MAE and MAPE, Damped Hold is the best model Let's see it's parameters
+
 ```{r}
 fit <- www_usage %>%
   model(Damped = ETS(value ~ error("A") + trend("Ad") + season("N")))
 # Los parámetros estimados:
 tidy(fit)
 ```
+
 ```{r}
 fit |> forecast(h=10) |> 
   autoplot(www_usage)+
   xlab("Minute") + ylab("Number of users")
 ```
+
 # Methods with seasonality
 
 For this method a new parameters that defines seasonal period is added. There are two variants for this method: additive and multiplicative. $Additive$ is used when seasonal component remains constant over time. Multiplicative is used when seasonal component varies with the serie
+
 ```{r}
 ausHolidays <- tourism |> 
   filter(Purpose == "Holiday") |> 
@@ -204,6 +219,7 @@ ausHolidays <- tourism |>
 ausHolidays |> 
   autoplot()
 ```
+
 ```{r}
 fit <- ausHolidays |> 
   model(
@@ -213,6 +229,7 @@ fit <- ausHolidays |>
 
 fit |> tidy()
 ```
+
 ```{r}
 fc <- fit |> 
   forecast(h = "3 years")
@@ -221,9 +238,11 @@ fc |> autoplot(ausHolidays, level = NULL)  + xlab("Year") +
   ylab("Overnight trips (millions)") +
   scale_color_brewer(type = "qual", palette = "Dark2")
 ```
+
 ## Damped Holt-Winters model
 
 Any of the variant os Holt-Winters can be damped
+
 ```{r}
 sth_cross_ped <- pedestrian %>%
   filter(Sensor == "Southern Cross Station", yearmonth(Date) == yearmonth("2016 July")) %>%
@@ -235,7 +254,9 @@ sth_cross_ped %>%
   forecast(h = "2 weeks") %>%
   autoplot(sth_cross_ped)
 ```
+
 ## ETS model automatic selection
+
 ```{r}
 automaticETS <- sth_cross_ped |> 
   model(hw = ETS(Count))
@@ -243,11 +264,13 @@ automaticETS <- sth_cross_ped |>
 automaticETS |> 
   report()
 ```
+
 ```{r}
 automaticETS |> 
   forecast(h = "2 weeks") |> 
   autoplot(sth_cross_ped)
 ```
+
 ```{r}
 sth_cross_ped |> 
   model(
@@ -258,6 +281,7 @@ sth_cross_ped |>
       autoplot(sth_cross_ped, level=NULL)
   
 ```
+
 ```{r}
 sth_cross_ped |> 
   model(
@@ -267,6 +291,7 @@ sth_cross_ped |>
 ```
 
 # Exponential Smoothing VS Reference methods
+
 ```{r}
 recent_production <- aus_production %>% filter(year(Quarter) >= 1992)
 beer_train <- recent_production %>% filter(year(Quarter) <= 2007)
@@ -288,11 +313,15 @@ beer_fc %>%
   ggtitle("Forecasts for quarterly beer production") +
   guides(colour=guide_legend(title="Forecast"))
 ```
+
 Seasonal NAIVE is the best
+
 ```{r}
 accuracy(beer_fc, recent_production)
 ```
+
 Seasonal NAIVE VS damped Holt-Winter method
+
 ```{r}
 beer_fit <- beer_train %>%
   model(
@@ -316,9 +345,11 @@ gg_beer_zoom <-  gg_beer + tidyquant::coord_x_date(xlim = c("2007-10-01","2010-0
 
 (gg_beer) / (gg_beer_zoom)
 ```
+
 ```{r}
 accuracy(beer_fc, recent_production)
 ```
+
 ```{r}
 beer_fc %>%
   filter(.model == "Damped Holt Winters") %>% 
@@ -327,7 +358,9 @@ beer_fc %>%
   ggtitle("Forecast for quarterly beer production using the Damped Holt Winters method") +
   guides(colour=guide_legend(title="Forecast"))
 ```
+
 #### EEUU employment example
+
 ```{r}
 us_retail_employment <- us_employment %>%
   filter(year(Month) >= 1990, Title == "Retail Trade")
@@ -336,6 +369,7 @@ us_retail_employment %>%
   autoplot(Employed)
 
 ```
+
 ```{r}
 
 us_retail_train <- us_retail_employment %>% 
@@ -363,14 +397,15 @@ gg_usret_zoom <-  gg_usret + tidyquant::coord_x_date(xlim = c("2018-01-01","2019
 
 (gg_usret) / (gg_usret_zoom)
 ```
+
 ```{r}
 accuracy(us_retail_fc, us_retail_employment)
 ```
+
 Seasonal NAIVE is again better than Exponentially Smoothed methods
 
-We can apply a STL model to model the series in 2 components
-- Seasonal component
-- Deseasonalized serie, with simple exponential smoothing
+We can apply a STL model to model the series in 2 components - Seasonal component - Deseasonalized serie, with simple exponential smoothing
+
 ```{r}
 us_retail_fit <- us_retail_train %>%
   model(
@@ -406,9 +441,11 @@ gg_usret_zoom <-  gg_usret + tidyquant::coord_x_date(xlim = c("2018-01-01","2019
 ```{r}
 accuracy(us_retail_fc, us_retail_employment)
 ```
-Descomposición + SE is the best 
+
+Descomposición + SE is the best
 
 We can easily combine 2 models by getting the average
+
 ```{r}
 us_retail_fit2 <- us_retail_fit %>% 
   mutate(
@@ -418,7 +455,9 @@ us_retail_fit2 <- us_retail_fit %>%
 
 accuracy(us_retail_fit2)
 ```
+
 Forecast
+
 ```{r}
 
 # Pronóstico
@@ -436,7 +475,9 @@ gg_usret_zoom <-  gg_usret + tidyquant::coord_x_date(xlim = c("2018-01-01","2019
 
 (gg_usret) / (gg_usret_zoom)
 ```
+
 ```{r}
 accuracy(us_retail_fc2, us_retail_employment)
 ```
+
 The combined model is the best
