@@ -1,0 +1,158 @@
+---
+title: "ARIMA"
+format: html
+editor: visual
+---
+
+# ARIMA Models
+
+
+## Seasonality and Diferentiation
+
+
+### Diferentiation
+One way to determine if a series is seasonal is looking at its correlation function, for a seasonal series, correlational will be 0
+
+```{r}
+library(tidyverse)
+library(fpp3)
+library(patchwork)
+```
+```{r}
+google_stock <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE) %>% 
+  mutate(diff_close = difference(Close))
+
+google_2015 <- google_stock %>% filter(year(Date) == 2015)
+```
+
+```{r}
+google_2015 %>% ACF(Close) %>% autoplot() | 
+  google_2015 %>% ACF(diff_close) %>% autoplot()
+```
+```{r}
+google_2015 |> features(diff_close, ljung_box, lag = 10)
+```
+Correlations are not significant
+
+Difference between season could be not significant, so second difference could be made (difference of the difference)
+
+### Seasonal diferrence
+
+Difference between a record and the previous record from the same season
+1. Apply log
+2. Seasonal differences
+3. Calculate changes in the differences
+```{r}
+PBS %>%
+  filter(ATC2 == "H02") %>%
+  summarise(Cost = sum(Cost)/1e6) %>%
+  transmute(
+    `Sales ($million)` = Cost,
+    `Log sales` = log(Cost),
+    `Annual change in log sales` = difference(log(Cost), 12),
+    `Doubly differenced log sales` = difference(difference(log(Cost), 12), 1)
+  ) %>%
+  gather("Type", "Sales", !!!syms(measured_vars(.)), factor_key = TRUE) %>%
+  ggplot(aes(x = Month, y = Sales)) +
+  geom_line() +
+  facet_grid(vars(Type), scales = "free_y") +
+  labs(title = "Corticosteroid drug sales", x = "Year", y = NULL)
+```
+### Unit root test
+To formally determine seasonality, we can do the unit root test
+```{r}
+google_2015 |> features(Close, unitroot_kpss)
+```
+If value less than 0.05, which suggest it's not seasonal
+
+```{r}
+google_2015 %>%
+  features(diff_close, unitroot_kpss)
+```
+First differences are seasonal
+```{r}
+#This function gives the differentiation ordern to convert the series to a seasonal series
+#So 1st difference
+google_2015 %>%
+  features(Close, unitroot_ndiffs)
+```
+
+#### Example
+```{r}
+aus_total_retail <- aus_retail %>%
+  summarise(Turnover = sum(Turnover))
+autoplot(aus_total_retail)
+```
+Not stationary
+```{r}
+
+aus_total_retail <- aus_total_retail %>%
+  mutate(log_turnover = log(Turnover)) 
+
+aus_total_retail %>% autoplot(log_turnover)
+```
+We used Log to reduce variance
+
+Function to get the order we need
+```{r}
+aus_total_retail %>%
+  features(log_turnover, unitroot_nsdiffs)
+```
+The test indicates that we need a seasonal difference. Then me make the test to see if we need first differences
+```{r}
+aus_total_retail %>%
+  mutate(log_turnover = difference(log(Turnover), 12)) %>%
+  features(log_turnover, unitroot_ndiffs)
+```
+Indeed we do
+
+### Partial and correlation function
+```{r}
+us_change %>% autoplot(Consumption) +
+  labs(x = "Year", y = "Quarterly percentage change", title = "US consumption")
+```
+Partial correlation
+```{r}
+us_change %>% PACF(Consumption) %>% autoplot()
+```
+We can see that first 3 lags are significant and the the value decreases, this could indicate the presence of a order p=3 model, which means ARIMA(3,0,0) from ARIMA(p,d,q) where:
+
+-   if p=1 it menas that actual serie value could be predicted by the inmediate previous value, if p=2 it means that the 2 previous values are used for the prediction 
+
+- d: how many differences should we make
+
+- q: Moving Average order. How many previous errors should we use
+
+ARIMA functions let us fit these models 
+```{r}
+fit <- us_change %>%
+  model(ARIMA(Consumption ~ pdq(3,0,0) + PDQ(0,0,0))) #Because series are not seasonal we specify PDQ(0,0,0)
+report(fit)
+```
+```{r}
+#This automatically find the best order
+fit2 <- us_change %>%
+  model(ARIMA(Consumption ~ PDQ(0,0,0)))
+report(fit2)
+```
+
+### ARIMA Model selection
+```{r}
+fit3 <- us_change %>%
+  model(ARIMA(Consumption ~ PDQ(0,0,0),
+              stepwise = FALSE, approximation = FALSE))
+report(fit3)
+```
+As a remainder, ARIMA models just work with data that doesn't have seasonality
+```{r}
+#We can also sepcify the hiperparameter grid to choose from
+fit4 <- us_change %>%
+  model(ARIMA(Consumption ~ pdq(1:3, 0, 0:2) + PDQ(0,0,0)))
+report(fit4)
+```
+
+### SARIMA - Seasonal ARIMA Models
+
