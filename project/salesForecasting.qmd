@@ -1,0 +1,93 @@
+---
+title: "salesModeling"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(tsibble)
+library(feasts)
+library(fable)
+library(tsibbledata)
+library(fpp3)
+library(plotly)
+```
+
+# Reading train
+
+```{r}
+train <- read.csv("created_train.csv")
+```
+
+### Making train a tsibble
+
+```{r}
+#Dropping duplicated column 
+train$X <- NULL
+train$id <- NULL
+train$onpromotion <- NULL
+
+
+#Parsing date field into date type
+train$date <- as.Date(train$date)
+
+#Making it a tsibble
+train <- as_tsibble(train,
+                    index = date,
+                    key = c(store_nbr,family))
+
+head(train,2)
+```
+
+# Reading test
+
+```{r}
+test <- read.csv("created_test.csv")
+```
+
+### Making test a tsibble
+
+```{r}
+#Dropping duplicated column 
+test$X <- NULL
+test$id <- NULL
+test$onpromotion <- NULL
+
+#Parsing date field into date type
+test$date <- as.Date(test$date)
+
+#Making it a tsibble
+test <- as_tsibble(test,
+                    index = date,
+                    key = c(store_nbr,family))
+
+head(test,2)
+```
+
+# Univariate forecasting
+
+####  Filling gaps
+```{r}
+has_gaps(train, .full = TRUE)
+```
+
+
+```{r}
+#We don't have data on christmas
+scan_gaps(train)
+```
+
+```{r}
+train_ <- train |> 
+  fill_gaps(.full = TRUE)
+
+scan_gaps(train_)
+```
+```{r}
+scan_gaps(test)
+```
+```{r}
+
+```
+
