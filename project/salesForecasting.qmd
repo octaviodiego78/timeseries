@@ -67,11 +67,11 @@ head(test,2)
 
 # Univariate forecasting
 
-####  Filling gaps
+#### Filling gaps
+
 ```{r}
 has_gaps(train, .full = TRUE)
 ```
-
 
 ```{r}
 #We don't have data on christmas
@@ -79,15 +79,73 @@ scan_gaps(train)
 ```
 
 ```{r}
-train_ <- train |> 
+train <- train |> 
   fill_gaps(.full = TRUE)
 
-scan_gaps(train_)
+scan_gaps(train)
 ```
+
 ```{r}
 scan_gaps(test)
 ```
 ```{r}
+train <- train |> 
+  fill(sales, .direction = "downup")
+```
 
+#### Visualization of total sales
+
+```{r}
+train |> 
+  index_by(date) |> 
+  summarise(totalSales = sum(sales)) |> 
+  autoplot()
+```
+#### Total Sales seasonality
+```{r}
+train |> 
+  index_by(date) |> 
+  summarise(totalSales = sum(sales)) |> gg_season() |> 
+  ggplotly()
+  
+```
+#### Total sales decomposition
+```{r}
+train |> 
+  index_by(date) |> 
+  summarise(totalSales = sum(sales))
+```
+```{r}
+train |> 
+  index_by(date) |> 
+  summarise(totalSales = sum(sales)) |> 
+  model(stl = STL(totalSales, robust = TRUE)) |> 
+  components() |> 
+  autoplot() |> 
+  ggplotly()
+```
+```{r}
+train |>  model(stl = STL(sales, robust = TRUE)) |> 
+  components()
+```
+#Modeling
+```{r}
+models <- train |>
+  model(
+    snaive = SNAIVE(sales),
+    sarima = ARIMA(sales) # R will fit a SARIMA Value
+  )
+```
+```{r}
+fc <- models |> 
+  forecast(h=15)
+
+```
+
+```{r}
+fc |> 
+  accuracy(test) |> 
+  select(.model:.type, MAPE, RMSE, MAE, MASE) |> 
+  arrange(MAPE)
 ```
 
