@@ -12,6 +12,7 @@ library(fable)
 library(tsibbledata)
 library(fpp3)
 library(plotly)
+library(fable.prophet)
 ```
 
 # Reading train
@@ -88,6 +89,7 @@ scan_gaps(train)
 ```{r}
 scan_gaps(test)
 ```
+
 ```{r}
 train <- train |> 
   fill(sales, .direction = "downup")
@@ -101,7 +103,9 @@ train |>
   summarise(totalSales = sum(sales)) |> 
   autoplot()
 ```
+
 #### Total Sales seasonality
+
 ```{r}
 train |> 
   index_by(date) |> 
@@ -109,43 +113,163 @@ train |>
   ggplotly()
   
 ```
-#### Total sales decomposition
+
 ```{r}
-train |> 
+train <- train |> 
   index_by(date) |> 
   summarise(totalSales = sum(sales))
 ```
+
+```{r}
+train
+```
+
+#### Total sales decomposition
+
 ```{r}
 train |> 
-  index_by(date) |> 
-  summarise(totalSales = sum(sales)) |> 
   model(stl = STL(totalSales, robust = TRUE)) |> 
   components() |> 
   autoplot() |> 
   ggplotly()
 ```
+
 ```{r}
-train |>  model(stl = STL(sales, robust = TRUE)) |> 
+train |>  model(stl = STL(totalSales, robust = TRUE)) |> 
   components()
 ```
-#Modeling
+
 ```{r}
-models <- train |>
-  model(
-    snaive = SNAIVE(sales),
-    sarima = ARIMA(sales) # R will fit a SARIMA Value
-  )
+test <- test |> 
+  index_by(date) |> 
+  summarise(totalSales = sum(sales))
+
 ```
+
+#Modeling with grouped data to see which model performs the best Then we'll model with the normal data to get real predictions
+
 ```{r}
-fc <- models |> 
+#sarima = ARIMA(sales) # R will fit a SARIMA Value
+model <- train |>
+  model(
+    snaive = SNAIVE(totalSales),
+    prophet = prophet(totalSales ~ growth("linear") + season("month",type="multiplicative")),
+    harmonic = ARIMA(totalSales ~ fourier(K = 3) + PDQ(0,0,0))
+    ) |> 
+  mutate(combined = (snaive + prophet + harmonic)/3)
+
+model
+```
+
+```{r}
+#Forecast for SNAIVE
+fc <- select(model, snaive) |> forecast(h=15)
+sqrt(mean((log1p(fc$.mean) - log1p(test$totalSales))^2))
+```
+
+```{r}
+#Forecast for prophet
+fc <- select(model, prophet) |> forecast(h=15)
+sqrt(mean((log1p(fc$.mean) - log1p(test$totalSales))^2))
+```
+
+```{r}
+#Forecast for harmonic
+fc <- select(model, harmonic) |> forecast(h=15)
+sqrt(mean((log1p(fc$.mean) - log1p(test$totalSales))^2))
+```
+
+```{r}
+#Forecast for combined
+fc <- select(model, combined) |> forecast(h=15)
+sqrt(mean((log1p(fc$.mean) - log1p(test$totalSales))^2))
+```
+
+# Predicting ungrouped values
+
+```{r}
+fc <- model |> 
   forecast(h=15)
 
+fc
+
 ```
 
 ```{r}
-fc |> 
-  accuracy(test) |> 
-  select(.model:.type, MAPE, RMSE, MAE, MASE) |> 
-  arrange(MAPE)
+actualValues <- test$totalSales
+predictedValues <- fc$.mean
+
+# Calculate RMSLE
+rmsle <- sqrt(mean((log1p(predictedValues) - log1p(actualValues))^2))
+
+rmsle
+```
+
+# Competition
+
+```{r}
+competitionTrain = read.csv("train.csv")
+competitionTest = read.csv("competitionTest.csv")
+```
+
+```{r}
+competitionTrain$X <- NULL
+competitionTrain$id <- NULL
+competitionTrain$onpromotion <- NULL
+
+
+#Parsing date field into date type
+competitionTrain$date <- as.Date(competitionTrain$date)
+
+shorterCompetitionTrain <- competitionTrain |> 
+  filter(year(date) > 2015)
+
+#Making it a tsibble
+shorterCompetitionTrain <- as_tsibble(shorterCompetitionTrain,
+                    index = date,
+                    key = c(store_nbr,family)) 
+
+shorterCompetitionTrain <- shorterCompetitionTrain %>%
+  mutate(flag_column = ifelse(day(date) == 15 | (day(date) == days_in_month(date)), 1, 0))
+
+
+```
+
+```{r}
+shorterCompetitionTrain <- fill_gaps(shorterCompetitionTrain)
+shorterCompetitionTrain <- shorterCompetitionTrain %>%
+  fill(sales, .direction = "down")
+```
+
+
+
+```{r}
+#Dropping duplicated column 
+competitionTest$X <- NULL
+competitionTest$id <- NULL
+competitionTest$onpromotion <- NULL
+
+#Parsing date field into date type
+competitionTest$date <- as.Date(competitionTest$date)
+
+#Making it a tsibble
+competitionTest <- as_tsibble(competitionTest,
+                    index = date,
+                    key = c(store_nbr,family))
+
+
+```
+
+
+
+
+```{r}
+model <- shorterCompetitionTrain |>
+  model(ARIMA(sales ~ flag_column))
+```
+
+
+```{r}
+fc <- model |> forecast()
 ```
 
